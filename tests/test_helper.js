@@ -1,10 +1,12 @@
+const bcrypt = require('bcrypt')
 const List = require('../models/list')
 const Card = require('../models/card')
+const User = require('../models/user')
 
 const initialLists = [
     {
         title: 'To dos',
-        creationDate: new Date()
+        creationDate: new Date(),
     },
     {
         title: 'WIP',
@@ -27,7 +29,7 @@ const initialCards = [
     {
         title: 'React official documentation',
         description: 'Start this task after full stack open course is complete',
-        list: 0 //index of list to be added later
+        list: 0
       },
       {
         title: 'Javascript perusteet',
@@ -48,33 +50,81 @@ const cardsInDB = async () => {
     return cards.map(card => card.toJSON())
 }
 
-const createInitialLists = async () => {
+const createInitialLists = async (user) => {
     for (let list of initialLists) {
-        const listObject = new List(list)
+        const listObject = new List({...list, user})
         await listObject.save()
       }
 }
 
-const createInitialCards = async () => {
+const createInitialCards = async (user) => {
     for (let card of initialCards) { 
       const lists = await listsInDB()
       randomIndex = Math.floor(Math.random() * lists.length)
       card.list = lists[randomIndex].id
-      const cardObject = new Card(card)
+      const cardObject = new Card({...card, user})
       const savedCard = await cardObject.save()
       const list = {cards: lists[randomIndex].cards.concat(savedCard.id)}
       await List.findByIdAndUpdate(lists[randomIndex].id,list)
   }
 }
 
-const nonExistingId = async () => {
+const nonExistingId = async (user) => {
     const lists = await listsInDB()
-    const card = new Card({ title: 'willremovethissoon', list: lists[0].id })
-    console.log(card)
+    const card = new Card({ title: 'willremovethissoon', list: lists[0].id, user })
     await card.save()
     await card.remove()
 
     return card._id.toString()
+
+  }
+
+  const usersInDB = async () => {
+    const users = await User.find({})
+    return users.map(u => u.toJSON())
+  }
+  
+  const createUser = async () => {
+    const username = 'infocus'
+    const password = 'password'
+    const passwordHash = await bcrypt.hash(password, 10)
+    const user = new User({
+      username,
+      name: 'Planahead Bruce',
+      passwordHash
+    })
+    const savedUser = await user.save()
+  
+    return { id: savedUser._id, username, password }
+  }
+  const createUnauthorisedUser = async () => {
+    const username = 'nosyparker'
+    const password = 'password'
+    const passwordHash = await bcrypt.hash(password, 10)
+    const user = new User({
+      username,
+      name: 'Curious Hedgehog',
+      passwordHash
+    })
+    const savedUser = await user.save()
+  
+    return { id: savedUser._id, username, password }
+  }
+
+  const createListsOfAnotherUser = async () => {
+    const username = 'makesome'
+    const password = 'fillerdata'
+    const passwordHash = await bcrypt.hash(password, 10)
+    const user = new User({
+      username,
+      passwordHash
+    })
+    const savedUser = await user.save()
+
+    for (let list of initialLists) {
+      const listObject = new List({...list, user: savedUser.id})
+      await listObject.save()
+    }
 
   }
 
@@ -83,5 +133,9 @@ module.exports = {
     listsInDB, 
     createInitialCards,
     cardsInDB,
-    nonExistingId
+    nonExistingId,
+    usersInDB,
+    createUser,
+    createUnauthorisedUser,
+    createListsOfAnotherUser
 }

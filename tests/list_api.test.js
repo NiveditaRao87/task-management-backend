@@ -1,128 +1,258 @@
 const mongoose = require('mongoose')
+const bcrypt = require('bcrypt')
 const supertest = require('supertest')
 const app = require('../app')
 const helper = require('./test_helper')
 const List = require('../models/list')
 const Card = require('../models/card')
+const User = require('../models/user')
 
 const api = supertest(app)
 
 beforeEach(async () => {
     await List.deleteMany({})
     await Card.deleteMany({})
-  
-    await helper.createInitialLists()
-    await helper.createInitialCards() //Lists should have already been created before this can be called
+    await User.deleteMany({})
+
+    const { id } = await helper.createUser()
+
+    await helper.createInitialLists(id)
+    await helper.createInitialCards(id) //Lists should have already been created before this can be called
+
 })
 
+afterAll(() => {
+  mongoose.connection.close()
+})
+
+const login = async () => {
+
+  const username = 'infocus' 
+  const password = 'password'
+  const { id } = await User.findOne({username})
+  
+  const response = await api
+    .post('/api/login')
+    .send({ username, password })
+    .expect(200)
+
+  const token = `bearer ${response.body.token}`
+
+  return { token, id }
+}
+
 describe('when there are initially some lists saved', () => {
+  
   test('lists are returned as json', async () => {
+    
+    const {token} = await login()
+    
     await api
       .get('/api/lists')
+      .set('Authorization', token)
       .expect(200)
       .expect('Content-Type', /application\/json/)
    })
-   test('all lists are returned', async () => {
-    const listsInDB = await helper.listsInDB()
-    const response = await api.get('/api/lists')
+   test('only lists of the user are returned', async () => {
+    
+    //Create lists of another user so that the database has data of more than one user
 
-    expect(response.body).toHaveLength(listsInDB.length)
+    await helper.createListsOfAnotherUser()
+    const listsInDB = await helper.listsInDB()
+
+    const {token, id} = await login()
+    
+    const listsOfUser = await List.find({user: id})
+    const response = await api.get('/api/lists').set('Authorization', token)
+
+    expect(response.body.length).toBeLessThan(listsInDB.length)
+    expect(response.body).toHaveLength(listsOfUser.length)
+  })  
+  test('a user is unable to retrieve another users list', async () => {
+    
+    const listsInDB = await helper.listsInDB()
+    const { id, username, password } = await helper.createUnauthorisedUser()
+
+    const loginResponse = await api
+    .post('/api/login')
+    .send({ username, password })
+    .expect(200)
+    
+    const token = `bearer ${loginResponse.body.token}`
+
+    //This user has no lists so returned length should be zero
+    
+    const response = await api.get('/api/lists').set('Authorization', token)
+
+    expect(listsInDB.length).toBeGreaterThan(0)
+    expect(response.body).toHaveLength(0)
   })  
   test('a specific list is within the returned lists', async () => {
-    const response = await api.get('/api/lists')
+    
+    const {token} = await login()
+    
+    const response = await api.get('/api/lists').set('Authorization', token)
 
     const titles = response.body.map(r => r.title)
     expect(titles).toContain('To dos')
   })
   test('a specific card on a list is within the returned lists', async () => {
-    //find the list of any one of the cards
-    const cardsInDB = await helper.cardsInDB()
-    await helper.listsInDB()
     
-    const response = await api.get('/api/lists')
-    const list = response.body.find(l => l.id.toString() === cardsInDB[0].list.toString())
+    const {token, id} = await login()
+
+    //find the list of any one of the cards
+    const userCardsInDB = await Card.find({user: id})
+
+    const response = await api.get('/api/lists').set('Authorization', token)
+    const list = response.body.find(l => l.id.toString() === userCardsInDB[0].list.toString())
     const cards = list.cards.map(card =>card.id)
-    expect(cards).toContain(cardsInDB[0].id)
+    expect(cards).toContain(userCardsInDB[0].id)
   })
 })
 
 describe('viewing a specific card', () => {
-  test('succeeds with a valid id', async () => {
+  test('succeeds with a valid id when requested by the owner', async () => {
     const cardsAtStart = await helper.cardsInDB()
+    const listsAtStart = await helper.listsInDB()
 
     const cardToView = cardsAtStart[0]
+    const cardList = listsAtStart.find(list => list.id.toString() === cardToView.list.toString())
+
+    const {token, id} = await login()
 
     const resultCard = await api
       .get(`/api/cards/${cardToView.id}`)
+      .set('Authorization', token)
       .expect(200)
       .expect('Content-Type', /application\/json/)
 
-    console.log(typeof cardToView.list, typeof resultCard.body.list)
-    expect(resultCard.body).toEqual({...cardToView,list: cardToView.list.toString()})
+    cardToView.user = cardToView.user.toString()
+    
+    expect(resultCard.body).toEqual({...cardToView,list: {id: cardList.id.toString(), title: cardList.title, user: cardList.user.toString()}})
+    expect(resultCard.body.user).toBe(id.toString())
   })
 
+  test('fails with a status code 401 when not requested by owner', async () => {
+
+    const cardsAtStart = await helper.cardsInDB()
+
+    const cardToView = cardsAtStart[0]
+    
+    const { username, password } = await helper.createUnauthorisedUser()
+
+    const response = await api
+    .post('/api/login')
+    .send({ username, password })
+    .expect(200)
+    
+    const token = `bearer ${response.body.token}`
+
+    const repsonse = await api
+      .get(`/api/cards/${cardToView.id}`)
+      .set('Authorization', token)
+      .expect(401)
+
+  })
   test('fails with statuscode 404 if card does not exist', async () => {
-    const validNonexistingId = await helper.nonExistingId()
+    
+    const {token, id} = await login()
+    
+    const validNonexistingId = await helper.nonExistingId(id)
 
     console.log(validNonexistingId)
 
     await api
       .get(`/api/cards/${validNonexistingId}`)
+      .set('Authorization',token)
       .expect(404)
   })
 
   test('fails with statuscode 400 id is invalid', async () => {
     const invalidId = '5a3d5da59070081a82a3445'
 
+    const {token} = await login()
+
     await api
       .get(`/api/cards/${invalidId}`)
+      .set('Authorization',token)
       .expect(400)
   })
 })
 
 describe('creation of a new list',() =>{
-    test('succeeds with valid data', async () => {
+    test('succeeds with valid data if token is present', async () => {
         const listsAtStart = await helper.listsInDB()
+
+        const {token, id} = await login()
+
         const newList = {
             title: 'Parked'
         }
 
         await api
           .post('/api/lists')
+          .set('Authorization',token)
           .send(newList)
           .expect(200)
           .expect('Content-Type', /application\/json/)
 
         const listsAtEnd = await helper.listsInDB()
         expect(listsAtEnd).toHaveLength(listsAtStart.length + 1)
-
-        const titles = (await listsAtEnd).map(r => r.title)
+        const titles = listsAtEnd.map(r => r.title)
         expect(titles).toContain('Parked')
-        expect(listsAtEnd.find(l => l.title === 'Parked').creationDate).toBeDefined()
+        const createdList = listsAtEnd.find(l => l.title === 'Parked')
+        expect(createdList.creationDate).toBeDefined()
+        expect(createdList.user.toString()).toBe(id)
 
     } )
+    test('fails with a status code 401 if token is missing', async() => {
+      const listsAtStart = await helper.listsInDB()
+
+        const newList = {
+            title: `Won't be created`
+        }
+
+        await api
+          .post('/api/lists')
+          .set('Authorization','bearer ')
+          .send(newList)
+          .expect(401)
+
+        const listsAtEnd = await helper.listsInDB()
+        expect(listsAtEnd).toHaveLength(listsAtStart.length)
+        const titles = listsAtEnd.map(r => r.title)
+        expect(titles).not.toContain(`Won't be created`)
+
+    })
     test('fails with a status code 400 if title is empty', async () => {
         
         const listsAtStart = await helper.listsInDB()
+
+        const {token} = await login()
         
         const newList = {
             title: ' '
         }
 
-        await api
+        const { body } = await api
           .post('/api/lists')
+          .set('Authorization', token)
           .send(newList)
           .expect(400)
 
         const listsAtEnd = await helper.listsInDB()
 
         expect(listsAtEnd).toHaveLength(listsAtStart.length)
+        expect(body.error).toBe('title should be present')
+
     })
 })
 
 describe('creation of a new card on a list',() =>{
     test('succeeds with valid data', async () => {
         
+        const {token, id} = await login()
+      
         const listsInDB = await helper.listsInDB()
         const cardsAtStart = await helper.cardsInDB()
         
@@ -134,23 +264,28 @@ describe('creation of a new card on a list',() =>{
         await api
           .post('/api/cards')
           .send(newCard)
+          .set('Authorization', token)
           .expect(200)
           .expect('Content-Type', /application\/json/)
 
         const cardsAtEnd = await helper.cardsInDB()
         expect(cardsAtEnd).toHaveLength(cardsAtStart.length + 1)
-
-        const titles = (await cardsAtEnd).map(r => r.title)
+        //Right now it is a little bit dirty data since the list is on a different user id and card is on a different
+        //one but once list is also created with user it can be fixed 
+        const titles = cardsAtEnd.map(r => r.title)
         expect(titles).toContain('Task Management App')
         const createdCard = cardsAtEnd.find(c => c.title === 'Task Management App')
         expect(createdCard.creationDate).toBeDefined()
         expect(createdCard.list.toString()).toBe(listsInDB[0].id.toString())
+        expect(createdCard.user.toString()).toBe(id.toString())
         //The list is also updated with the card id
         const listsAtEnd = await helper.listsInDB()
         expect(listsAtEnd[0].cards.toString()).toContain(createdCard.id)
     } )
     test('fails with a status code 400 if title is empty', async () => {
         
+        const {token} = await login()
+      
         const listsInDB = await helper.listsInDB()
         const cardsAtStart = await helper.cardsInDB()
 
@@ -162,6 +297,7 @@ describe('creation of a new card on a list',() =>{
         const { body } = await api
           .post('/api/cards')
           .send(newCard)
+          .set('Authorization', token)
           .expect(400)
 
         const cardsAtEnd = await helper.cardsInDB()
@@ -171,6 +307,8 @@ describe('creation of a new card on a list',() =>{
     })
     test('fails with a status code 400 if list is not present', async () => {
         
+        const {token} = await login()
+      
         const cardsAtStart = await helper.cardsInDB()
         
         const newCard = {
@@ -180,6 +318,7 @@ describe('creation of a new card on a list',() =>{
         const { body } = await api
           .post('/api/cards')
           .send(newCard)
+          .set('Authorization', token)
           .expect(400)
 
         const cardsAtEnd = await helper.cardsInDB()
@@ -187,16 +326,42 @@ describe('creation of a new card on a list',() =>{
         expect(cardsAtEnd).toHaveLength(cardsAtStart.length)
         expect(body.error).toContain('Card validation failed: list: Path `list` is required')
     })
+    test('fails with status 401 if token is missing', async () => {
+
+      const listsInDB = await helper.listsInDB()
+        
+      const cardsAtStart = await helper.cardsInDB()
+        
+      const newCard = {
+          title: 'Task Management App',
+          list: listsInDB[0].id
+      }
+  
+      const response = await api
+        .post('/api/cards')
+        .send(newCard)
+        .set('Authorization', 'bearer ')
+        .expect(401)
+
+      const cardsAtEnd = await helper.cardsInDB()
+  
+      expect(response.body.error).toContain('token missing')
+      expect(cardsAtStart.length).toBe(cardsAtEnd.length)
+    })
 
 })
 
 describe('updation of a list',() => {
-  test('succeeds when the title is updated', async () => {
-    const [ aList ] = await helper.listsInDB()
+  test('succeeds when the title is updated by the owner', async () => {
+    
+    const {token, id} = await login()
+    
+    const [ aList ] = (await List.find({user: id})).map(list => list.toJSON())
     const editList = {...aList, title: 'Update the list title to this'}
 
     await api
       .put(`/api/lists/${aList.id}`)
+      .set('Authorization', token)
       .send(editList)
       .expect(200)
 
@@ -204,28 +369,59 @@ describe('updation of a list',() => {
     const editedList = listsAtEnd.find(l => l.id === aList.id)
     expect(editedList.title).toBe(editList.title)
   })
-  test.only('fails when the title is not present', async () => {
-    const [ aList ] = await helper.listsInDB()
+  test('fails with status 304 when the title is not present', async () => {
+    const { token, id } = await login()
+    
+    const [ aList ] = (await List.find({user: id})).map(list => list.toJSON())
     const editList = {...aList, title: ''}
 
     await api
       .put(`/api/lists/${aList.id}`)
+      .set('Authorization', token)
       .send(editList)
-      .expect(400)
-
+      .expect(304) //Not modified
+      
     const listsAtEnd = await helper.listsInDB()
-    const editedList = listsAtEnd.find(l => l.id === aList.id)
-    expect(editedList.title).not.toBe('')
+    const uneditedList = listsAtEnd.find(l => l.id === aList.id)
+    // title should remain unchanged
+    expect(uneditedList.title).toBe(aList.title)
+  })
+  test('fails with status 401 when request is sent by another user', async () => {
+    const [aList] = await helper.listsInDB()
+    const editList = {...aList, title: 'This update should fail'}
+
+    //Create a new user who has no lists
+    const { username, password } = await helper.createUnauthorisedUser()
+
+    const response = await api
+    .post('/api/login')
+    .send({ username, password })
+    .expect(200)
+    
+    const token = `bearer ${response.body.token}`
+
+    await api
+      .put(`/api/lists/${aList.id}`)
+      .set('Authorization', token)
+      .send(editList)
+      .expect(401)
+    
+    const listsAtEnd = await helper.listsInDB()
+    const uneditedList = listsAtEnd.find(l => l.id === aList.id)
+    expect(uneditedList.title).not.toBe('This update should fail')
   })
 })
 
 describe('updation of a card',() => {
-  test('succeeds when the title is updated', async () => {
-    const [ aCard ] = await helper.cardsInDB()
+  test('succeeds when the title is updated by the owner', async () => {
+    const {token, id} = await login()
+    
+    const [ aCard ] = (await Card.find({user: id})).map(card => card.toJSON())
     const editCard = {...aCard, title: 'Update the card title to this'}
 
     await api
       .put(`/api/cards/${aCard.id}`)
+      .set('Authorization', token)
       .send(editCard)
       .expect(200)
 
@@ -234,20 +430,174 @@ describe('updation of a card',() => {
     expect(editedCard.title).toBe(editCard.title)
   })
   test('fails when the title is not present', async () => {
-    const [ aCard ] = await helper.cardsInDB()
+    const { token, id } = await login()
+    
+    const [ aCard ] = (await Card.find({user: id})).map(card => card.toJSON())
+
     const editCard = {...aCard, title: ''}
 
     await api
       .put(`/api/cards/${aCard.id}`)
+      .set('Authorization', token)
       .send(editCard)
-      .expect(400)
+      .expect(304)
 
     const cardsAtEnd = await helper.cardsInDB()
     const editedCard = cardsAtEnd.find(c => c.id === aCard.id)
-    expect(editedCard.title).not.toBe('')
+    // title should remain unchanged
+    expect(editedCard.title).toBe(aCard.title)
+  })
+  test('fails with status 401 when request is sent by another user', async () => {
+    const [aCard] = await helper.cardsInDB()
+    const editCard = {...aCard, title: 'This update should fail'}
+
+    //Create a new user who has no lists
+    const { username, password } = await helper.createUnauthorisedUser()
+
+    const response = await api
+    .post('/api/login')
+    .send({ username, password })
+    .expect(200)
+    
+    const token = `bearer ${response.body.token}`
+
+    await api
+      .put(`/api/cards/${aCard.id}`)
+      .set('Authorization', token)
+      .send(editCard)
+      .expect(401)
+    
+    const cardsAtEnd = await helper.cardsInDB()
+    const uneditedCard = cardsAtEnd.find(c => c.id === aCard.id)
+    expect(uneditedCard.title).not.toBe('This update should fail')
   })
 })
 
-afterAll(() => {
-  mongoose.connection.close()
+describe('when there is initially one user in db', () => {
+  beforeEach(async () => {
+    await User.deleteMany({})
+
+    const passwordHash = await bcrypt.hash('shhhhhhh', 10)
+    const user = new User({ username: 'root', passwordHash })
+
+    await user.save()
+  })
+  test('creation succeeds with a fresh valid username', async () => {
+    const usersAtStart = await helper.usersInDB()
+
+    const newUser = {
+      username: 'nroar',
+      name: 'Nivedita R Rao',
+      password: 'password',
+    }
+
+    await api
+      .post('/api/users')
+      .send(newUser)
+      .expect(200)
+      .expect('Content-Type', /application\/json/)
+
+    const usersAtEnd = await helper.usersInDB()
+    expect(usersAtEnd).toHaveLength(usersAtStart.length + 1)
+
+    const usernames = usersAtEnd.map(u => u.username)
+    expect(usernames).toContain(newUser.username)
+  })
+  test('creation fails with proper statuscode and message if username already taken', async () => {
+    const usersAtStart = await helper.usersInDB()
+
+    const newUser = {
+      username: 'root',
+      name: 'Superuser',
+      password: 'something',
+    }
+
+    const result = await api
+      .post('/api/users')
+      .send(newUser)
+      .expect(400)
+      .expect('Content-Type', /application\/json/)
+
+    expect(result.body.error).toContain('`username` to be unique')
+
+    const usersAtEnd = await helper.usersInDB()
+    expect(usersAtEnd).toHaveLength(usersAtStart.length)
+  })
+  test('creation fails with proper statuscode and message if username is missing', async () => {
+    const usersAtStart = await helper.usersInDB()
+    const newUser = {
+      name: 'Anonymous',
+      password: 'password',
+    }
+
+    const result = await api
+      .post('/api/users')
+      .send(newUser)
+      .expect(400)
+      .expect('Content-Type', /application\/json/)
+
+    expect(result.body.error).toContain('`username` is required.')
+
+    const usersAtEnd = await helper.usersInDB()
+    expect(usersAtEnd).toHaveLength(usersAtStart.length)
+  })
+  test('creation fails with proper statuscode and message if username is less than 3 characters', async () => {
+    const usersAtStart = await helper.usersInDB()
+    const newUser = {
+      username: 'pi',
+      name: 'Constant',
+      password: 'password',
+    }
+
+    const result = await api
+      .post('/api/users')
+      .send(newUser)
+      .expect(400)
+      .expect('Content-Type', /application\/json/)
+
+    expect(result.body.error).toContain('is shorter than the minimum allowed length')
+    expect(result.body.error).toContain('username')
+
+    const usersAtEnd = await helper.usersInDB()
+    expect(usersAtEnd).toHaveLength(usersAtStart.length)
+  })
+  test('creation fails with proper statuscode and message if password is missing', async () => {
+    const usersAtStart = await helper.usersInDB()
+    const newUser = {
+      username: 'Forgot',
+      name: 'Password',
+    }
+
+    const result = await api
+      .post('/api/users')
+      .send(newUser)
+      .expect(400)
+      .expect('Content-Type', /application\/json/)
+
+    expect(result.body.error).toContain('password is required')
+
+    const usersAtEnd = await helper.usersInDB()
+    expect(usersAtEnd).toHaveLength(usersAtStart.length)
+  })
+  test('creation fails with proper statuscode and message if password is less than 8 characters', async () => {
+    const usersAtStart = await helper.usersInDB()
+    const newUser = {
+      username: 'Short',
+      name: 'Short Hand',
+      password: 'minimum',
+    }
+
+    const result = await api
+      .post('/api/users')
+      .send(newUser)
+      .expect(400)
+      .expect('Content-Type', /application\/json/)
+
+    expect(result.body.error).toContain('password must have a minimum length of 8')
+
+    const usersAtEnd = await helper.usersInDB()
+    expect(usersAtEnd).toHaveLength(usersAtStart.length)
+  })
+
+
 })

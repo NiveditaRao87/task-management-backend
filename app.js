@@ -3,10 +3,10 @@ const express = require('express')
 require('express-async-errors') //For async-await error handling
 const app = express()
 const cors = require('cors') //To allow requests from other origins
-// const loginRouter = require('./controllers/login')
- const listsRouter = require('./controllers/lists')
- const cardsRouter = require('./controllers/cards')
-//const usersRouter = require('./controllers/users')
+const loginRouter = require('./controllers/login')
+const listsRouter = require('./controllers/lists')
+const cardsRouter = require('./controllers/cards')
+const usersRouter = require('./controllers/users')
 const middleware = require('./utils/middleware')
 const logger = require('./utils/logger')
 const mongoose = require('mongoose')
@@ -25,11 +25,12 @@ app.use(cors())
 app.use(express.static('build'))
 app.use(express.json())
 app.use(middleware.requestLogger)
+app.use(middleware.tokenExtractor)
 
 app.use('/api/lists', listsRouter)
 app.use('/api/cards', cardsRouter)
-// app.use('/api/users', usersRouter)
-// app.use('/api/login', loginRouter)
+app.use('/api/users', usersRouter)
+app.use('/api/login', loginRouter)
 
 //For clearing database for e2e testing
 // if (process.env.NODE_ENV === 'test') {
