@@ -71,7 +71,7 @@ describe('when there are initially some lists saved', () => {
   test('a user is unable to retrieve another users list', async () => {
     
     const listsInDB = await helper.listsInDB()
-    const { id, username, password } = await helper.createUnauthorisedUser()
+    const { username, password } = await helper.createUnauthorisedUser()
 
     const loginResponse = await api
     .post('/api/login')
@@ -128,7 +128,10 @@ describe('viewing a specific card', () => {
 
     cardToView.user = cardToView.user.toString()
     
-    expect(resultCard.body).toEqual({...cardToView,list: {id: cardList.id.toString(), title: cardList.title, user: cardList.user.toString()}})
+    expect(resultCard.body).toEqual({...cardToView,
+                                     list: {id: cardList.id.toString(), 
+                                     title: cardList.title, 
+                                     user: cardList.user.toString()}})
     expect(resultCard.body.user).toBe(id.toString())
   })
 
@@ -270,8 +273,8 @@ describe('creation of a new card on a list',() =>{
 
         const cardsAtEnd = await helper.cardsInDB()
         expect(cardsAtEnd).toHaveLength(cardsAtStart.length + 1)
-        //Right now it is a little bit dirty data since the list is on a different user id and card is on a different
-        //one but once list is also created with user it can be fixed 
+        //Right now it is a little bit dirty data since the list is on a different user id and card is on a 
+        //different one but once list is also created with user it can be fixed 
         const titles = cardsAtEnd.map(r => r.title)
         expect(titles).toContain('Task Management App')
         const createdCard = cardsAtEnd.find(c => c.title === 'Task Management App')
@@ -351,7 +354,7 @@ describe('creation of a new card on a list',() =>{
 
 })
 
-describe('updation of a list',() => {
+describe('updating a list',() => {
   test('succeeds when the title is updated by the owner', async () => {
     
     const {token, id} = await login()
@@ -412,7 +415,7 @@ describe('updation of a list',() => {
   })
 })
 
-describe('updation of a card',() => {
+describe('updating a card',() => {
   test('succeeds when the title is updated by the owner', async () => {
     const {token, id} = await login()
     
@@ -471,6 +474,188 @@ describe('updation of a card',() => {
     const uneditedCard = cardsAtEnd.find(c => c.id === aCard.id)
     expect(uneditedCard.title).not.toBe('This update should fail')
   })
+})
+
+describe('moving a card to another list', () => {
+  test('succeeds when the new list exists', async () => {
+    const {token, id} = await login()
+    
+    const [ aCard ] = (await Card.find({user: id})).map(card => card.toJSON())
+    
+    const listsAtStart = await helper.listsInDB()
+    const newList = listsAtStart
+      .find(list => list.id !== aCard.list.toString() && list.user.toString() === aCard.user.toString())
+    const editCard = {...aCard, list: newList.id}
+
+
+    await api
+      .put(`/api/cards/${aCard.id}`)
+      .set('Authorization', token)
+      .send(editCard)
+      .expect(200)
+    
+    const cardsAtEnd = await helper.cardsInDB()
+    const listsAtEnd = await helper.listsInDB()
+    const updatedCard = cardsAtEnd.find(card => card.id === aCard.id)
+    const newListCards = listsAtEnd.find(list => list.id === newList.id).cards.map(card => card.toString())
+    const oldListCards = listsAtEnd.find(list => list.id === aCard.list.toString()).cards.map(card => card.toString())
+    //Check the card, new list and the old list
+    expect(listsAtEnd).toHaveLength(listsAtStart.length)
+    expect(updatedCard.list.toString()).toBe(newList.id)
+    expect(newListCards).toContain(aCard.id.toString())
+    expect(oldListCards).not.toContain(aCard.id.toString())
+    
+  })
+  test('fails with status 400 when new list does not exist ', async () => {
+    const {token, id} = await login()
+
+    const [ aCard ] = (await Card.find({user: id})).map(card => card.toJSON())
+    
+    const listsAtStart = await helper.listsInDB()
+    const validNonexistingId = await helper.nonExistingId(id)
+
+    const editCard = {...aCard, list: validNonexistingId}
+
+    const result = await api
+      .put(`/api/cards/${aCard.id}`)
+      .set('Authorization', token)
+      .send(editCard)
+      .expect(400)
+
+      const cardsAtEnd = await helper.cardsInDB()
+      const uneditedCard = cardsAtEnd.find(c => c.id === aCard.id)
+      const listsAtEnd = await helper.listsInDB()
+      expect(uneditedCard.list).toEqual(aCard.list)
+      expect(listsAtStart).toEqual(listsAtEnd)
+      expect(result.body.error).toContain('no such list')
+      
+  })
+})
+
+describe('deleting a card', () =>{
+  test('succeeds when the owner sends the request', async() => {
+    const {token, id} = await login()
+    const [ aCard ] = (await Card.find({user: id})).map(card => card.toJSON())
+    const cardsAtStart = await helper.cardsInDB()
+    const listsAtStart = await helper.listsInDB()
+
+    const cardsOnListBefore = listsAtStart
+      .find(list => list.id === aCard.list.toString()).cards
+      .map(card => card.toString())
+    await api
+      .delete(`/api/cards/${aCard.id}`)
+      .set('Authorization', token)
+      .expect(204)
+    
+    const cardsAtEnd = await helper.cardsInDB()
+    const listsAtEnd = await helper.listsInDB()
+    const cardsOnListAfter = listsAtEnd
+      .find(list => list.id === aCard.list.toString()).cards
+      .map(card => card.toString())
+
+    expect(cardsAtEnd).toHaveLength(cardsAtStart.length - 1)
+    expect(cardsOnListBefore).toContain(aCard.id.toString())
+    expect(cardsOnListAfter).not.toContain(aCard.id.toString())
+
+  })
+  test('fails when another user sends the request', async () => {
+    const { username, password } = await helper.createUnauthorisedUser()
+
+    const loginResponse = await api
+    .post('/api/login')
+    .send({ username, password })
+    .expect(200)
+    
+    const token = `bearer ${loginResponse.body.token}`
+
+    const cardsAtStart = await helper.cardsInDB()
+    const listsAtStart = await helper.listsInDB()
+
+    const result = await api
+      .delete(`/api/cards/${cardsAtStart[0].id}`)
+      .set('Authorization', token)
+      .expect(401)
+
+    const cardsAtEnd = await helper.cardsInDB()
+    const listsAtEnd = await helper.listsInDB()
+
+    expect(cardsAtEnd).toHaveLength(cardsAtStart.length)
+    expect(cardsAtEnd).toEqual(cardsAtStart)
+    expect(listsAtEnd).toEqual(listsAtStart)
+    expect(result.body.error).toContain('only the owner can delete the card')
+  })
+})
+
+describe('deletion of a list', () => {
+  test('fails when there are cards on the list', async() => {
+    const {token} = await login()
+    const listsAtStart = await helper.listsInDB()
+    const cardsAtStart = await helper.cardsInDB()
+
+    const list = listsAtStart.find(list => list.cards.length !== 0)
+
+    const result = await api
+      .delete(`/api/lists/${list.id}`)
+      .set('Authorization', token)
+      .expect(400)
+
+    const listsAtEnd = await helper.listsInDB()
+    const cardsAtEnd = await helper.cardsInDB()
+
+    expect(listsAtStart).toEqual(listsAtEnd)
+    expect(cardsAtStart).toEqual(cardsAtEnd)
+    expect(result.body.error).toContain('only an empty list may be deleted')
+  })
+  test('succeeds when there are no cards on the list', async() => {
+    const {token,id} = await login()
+    
+    const emptyList = await helper.createEmptyList(id)
+    const listsAtStart = await helper.listsInDB()
+    const cardsAtStart = await helper.cardsInDB()
+
+    await api
+      .delete(`/api/lists/${emptyList.id}`)
+      .set('Authorization', token)
+      .expect(204)
+
+    const listsAtEnd = await helper.listsInDB()
+    const cardsAtEnd = await helper.cardsInDB()
+    const listsAtEndIds = listsAtEnd.map(list => list.id)
+
+    expect(listsAtEnd).toHaveLength(listsAtStart.length - 1)
+    expect(cardsAtEnd).toEqual(cardsAtStart)
+    expect(listsAtEndIds).not.toContain(emptyList.id)
+
+  })
+  test('fails when another user sends the request', async () => {
+    const {id} = await login()
+    
+    const emptyList = await helper.createEmptyList(id)
+    const listsAtStart = await helper.listsInDB()
+    const cardsAtStart = await helper.cardsInDB()
+    
+    const { username, password } = await helper.createUnauthorisedUser()
+
+    const loginResponse = await api
+    .post('/api/login')
+    .send({ username, password })
+    .expect(200)
+    
+    const token = `bearer ${loginResponse.body.token}`
+
+    const result = await api
+      .delete(`/api/lists/${emptyList.id}`)
+      .set('Authorization', token)
+      .expect(401)
+
+    const cardsAtEnd = await helper.cardsInDB()
+    const listsAtEnd = await helper.listsInDB()
+
+    expect(cardsAtEnd).toEqual(cardsAtStart)
+    expect(listsAtEnd).toEqual(listsAtStart)
+    expect(result.body.error).toContain('only the owner can delete the list')
+  })
+
 })
 
 describe('when there is initially one user in db', () => {

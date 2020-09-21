@@ -16,7 +16,7 @@ const cardSchema = new mongoose.Schema({
         stop: String
       }
   ],
-  currentTask: Boolean,
+  tickingFrom: Date,
   totalHours: Number,
   estimatedHours: Number,
   overDue: Boolean,

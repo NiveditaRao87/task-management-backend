@@ -128,6 +128,16 @@ const nonExistingId = async (user) => {
 
   }
 
+  const createEmptyList = async (user) => {
+    const list = {
+      title: 'Empty list',
+      creationDate: new Date(),
+    }
+    const listObject = new List({...list, user: user.toString()})
+    const returnedList = await listObject.save()
+    return returnedList.toJSON()
+  }
+
 module.exports = {
     createInitialLists,
     listsInDB, 
@@ -137,5 +147,6 @@ module.exports = {
     usersInDB,
     createUser,
     createUnauthorisedUser,
-    createListsOfAnotherUser
+    createListsOfAnotherUser,
+    createEmptyList
 }

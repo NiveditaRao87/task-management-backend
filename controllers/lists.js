@@ -3,22 +3,11 @@ const jwt = require('jsonwebtoken')
 const List = require('../models/list')
 const User = require('../models/user')
 
-// const regExp = require('../constants/regex')
-
 listsRouter.get('/', async (request, response) => {
     
-    if (!request.token) {
-      return response.status(401).json({ error: 'token missing' })
-    }
-    const decodedToken = jwt.verify(request.token, process.env.SECRET)
-  
-    if (!decodedToken.id) {
-     return response.status(401).json({ error: 'token invalid' })
-    }
-  
     const lists = await 
     List
-      .find({user: decodedToken.id}).populate('cards', {title : 1, dueDate: 1, currentTask: 1 })
+      .find({user: request.decodedToken.id}).populate('cards', {id: 1, title : 1, dueDate: 1, tickingFrom: 1 })
       .populate('user', { username: 1, name: 1 })
     
     response.json(lists)
@@ -26,19 +15,11 @@ listsRouter.get('/', async (request, response) => {
 
 listsRouter.post('/', async (request, response) => {
     const body = request.body
-    if (!request.token) {
-      return response.status(401).json({ error: 'token missing' })
-    }
-    const decodedToken = jwt.verify(request.token, process.env.SECRET)
-  
-    if (!decodedToken.id) {
-     return response.status(401).json({ error: 'token invalid' })
-    }
 
     const list = new List({
       title: body.title.trim(),
       creationDate: new Date(),
-      user: decodedToken.id
+      user: request.decodedToken.id
     })
 
     if(!list.title){
@@ -47,7 +28,7 @@ listsRouter.post('/', async (request, response) => {
       })
     }
 
-    const user = await User.findById(decodedToken.id)
+    const user = await User.findById(request.decodedToken.id)
     if(!user){
       return response.status(401).json({ error: 'non-existent user'})
     }
@@ -61,15 +42,6 @@ listsRouter.post('/', async (request, response) => {
 listsRouter.put('/:id', async (request, response) => {
     const list = request.body
 
-    if (!request.token) {
-      return response.status(401).json({ error: 'token missing' })
-    }
-    const decodedToken = jwt.verify(request.token, process.env.SECRET)
-  
-    if (!decodedToken.id) {
-     return response.status(401).json({ error: 'token invalid' })
-    }
-
     if(!list.title){
       //treat absence of title as no change in stead of error
       return response.status(304).end()
@@ -80,12 +52,29 @@ listsRouter.put('/:id', async (request, response) => {
       return response.status(401).json({ error: 'non-existent user'})
     }
 
-    if(user.toString() !== decodedToken.id){
+    if(user.toString() !== request.decodedToken.id){
       return response.status(401).json({ error: 'unauthorised user'})
     }
 
     const updatedList = await List.findByIdAndUpdate(request.params.id, list, { new: true })
     response.json(updatedList.toJSON())
+})
+
+listsRouter.delete('/:id', async (request,response) => {
+  const user = await User.findById(request.decodedToken.id)
+  const list = await List.findById(request.params.id)
+
+  if (list.user.toString() !== user.id.toString()) {
+    return response.status(401).json({ error: 'only the owner can delete the list' })
+  }
+  if(list.cards.length !== 0){
+    return response.status(400).json({ error: 'only an empty list may be deleted' })
+  }
+
+  await list.remove()
+
+  response.status(204).end()
+
 })
 
 module.exports = listsRouter
