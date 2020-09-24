@@ -7,10 +7,16 @@ const userSchema = new mongoose.Schema({
   username: {
     type: String,
     unique: true,
-    required: true,
-    minlength: 3
+    required: true
   },
-  name: String,
+  firstName: {
+    type: String,
+    required: true
+  },
+  lastName: {
+    type: String,
+    required: true
+  },
   passwordHash: String,
   lists: [
     {
@@ -35,3 +41,5 @@ userSchema.set('toJSON', {
 const User = mongoose.model('User', userSchema)
 
 module.exports = User
+
+//To dos for future add email validation in backend as well, dont trust frontend

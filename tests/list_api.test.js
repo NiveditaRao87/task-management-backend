@@ -27,7 +27,7 @@ afterAll(() => {
 
 const login = async () => {
 
-  const username = 'infocus' 
+  const username = 'infocus@email.com' 
   const password = 'password'
   const { id } = await User.findOne({username})
   
@@ -663,7 +663,7 @@ describe('when there is initially one user in db', () => {
     await User.deleteMany({})
 
     const passwordHash = await bcrypt.hash('shhhhhhh', 10)
-    const user = new User({ username: 'root', passwordHash })
+    const user = new User({ username: 'root@admin.com', passwordHash, firstName: 'Super', lastName: 'User' })
 
     await user.save()
   })
@@ -671,8 +671,9 @@ describe('when there is initially one user in db', () => {
     const usersAtStart = await helper.usersInDB()
 
     const newUser = {
-      username: 'nroar',
-      name: 'Nivedita R Rao',
+      username: 'nroar@email.com',
+      firstName: 'Nivedita R',
+      lastName: 'Rao',
       password: 'password',
     }
 
@@ -692,8 +693,9 @@ describe('when there is initially one user in db', () => {
     const usersAtStart = await helper.usersInDB()
 
     const newUser = {
-      username: 'root',
-      name: 'Superuser',
+      username: 'root@admin.com',
+      firstName: 'Super',
+      lastName: 'Man',
       password: 'something',
     }
 
@@ -703,7 +705,7 @@ describe('when there is initially one user in db', () => {
       .expect(400)
       .expect('Content-Type', /application\/json/)
 
-    expect(result.body.error).toContain('`username` to be unique')
+    expect(result.body.error).toContain('email is already registered. Would you like to login?')
 
     const usersAtEnd = await helper.usersInDB()
     expect(usersAtEnd).toHaveLength(usersAtStart.length)
@@ -726,31 +728,33 @@ describe('when there is initially one user in db', () => {
     const usersAtEnd = await helper.usersInDB()
     expect(usersAtEnd).toHaveLength(usersAtStart.length)
   })
-  test('creation fails with proper statuscode and message if username is less than 3 characters', async () => {
-    const usersAtStart = await helper.usersInDB()
-    const newUser = {
-      username: 'pi',
-      name: 'Constant',
-      password: 'password',
-    }
+  // test('creation fails with proper statuscode and message if username is less than 3 characters', async () => {
+  //   const usersAtStart = await helper.usersInDB()
+  //   const newUser = {
+  //     username: 'pi',
+  //     firstName: 'Mathematical',
+  //     lastName: 'Constant',
+  //     password: 'password',
+  //   }
 
-    const result = await api
-      .post('/api/users')
-      .send(newUser)
-      .expect(400)
-      .expect('Content-Type', /application\/json/)
+  //   const result = await api
+  //     .post('/api/users')
+  //     .send(newUser)
+  //     .expect(400)
+  //     .expect('Content-Type', /application\/json/)
 
-    expect(result.body.error).toContain('is shorter than the minimum allowed length')
-    expect(result.body.error).toContain('username')
+  //   expect(result.body.error).toContain('is shorter than the minimum allowed length')
+  //   expect(result.body.error).toContain('username')
 
-    const usersAtEnd = await helper.usersInDB()
-    expect(usersAtEnd).toHaveLength(usersAtStart.length)
-  })
+  //   const usersAtEnd = await helper.usersInDB()
+  //   expect(usersAtEnd).toHaveLength(usersAtStart.length)
+  // })
   test('creation fails with proper statuscode and message if password is missing', async () => {
     const usersAtStart = await helper.usersInDB()
     const newUser = {
-      username: 'Forgot',
-      name: 'Password',
+      username: 'forgetmenot@email.com',
+      firstName: 'Forgot',
+      lastName: 'Password'
     }
 
     const result = await api
@@ -767,8 +771,9 @@ describe('when there is initially one user in db', () => {
   test('creation fails with proper statuscode and message if password is less than 8 characters', async () => {
     const usersAtStart = await helper.usersInDB()
     const newUser = {
-      username: 'Short',
-      name: 'Short Hand',
+      username: 'Short@sweet.com',
+      firstName: 'Short',
+      lastName: 'Hand',
       password: 'minimum',
     }
 

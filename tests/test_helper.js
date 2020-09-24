@@ -85,12 +85,13 @@ const nonExistingId = async (user) => {
   }
   
   const createUser = async () => {
-    const username = 'infocus'
+    const username = 'infocus@email.com'
     const password = 'password'
     const passwordHash = await bcrypt.hash(password, 10)
     const user = new User({
       username,
-      name: 'Planahead Bruce',
+      firstName: 'Planahead',
+      lastName: 'Bruce',
       passwordHash
     })
     const savedUser = await user.save()
@@ -98,12 +99,13 @@ const nonExistingId = async (user) => {
     return { id: savedUser._id, username, password }
   }
   const createUnauthorisedUser = async () => {
-    const username = 'nosyparker'
+    const username = 'nosy@parker.com'
     const password = 'password'
     const passwordHash = await bcrypt.hash(password, 10)
     const user = new User({
       username,
-      name: 'Curious Hedgehog',
+      firstName: 'Curious',
+      lastName: 'Hedgehog',
       passwordHash
     })
     const savedUser = await user.save()
@@ -112,12 +114,14 @@ const nonExistingId = async (user) => {
   }
 
   const createListsOfAnotherUser = async () => {
-    const username = 'makesome'
+    const username = 'makesome@email.com'
     const password = 'fillerdata'
     const passwordHash = await bcrypt.hash(password, 10)
     const user = new User({
       username,
-      passwordHash
+      passwordHash,
+      firstName: 'Another',
+      lastName: 'User'
     })
     const savedUser = await user.save()
 
