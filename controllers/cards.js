@@ -30,6 +30,7 @@ cardsRouter.post('/', async (request, response) => {
        title: body.title.trim(),
        creationDate: new Date(),
        list: body.list,
+       tickingFrom: new Date(0),
        user: user.id
      })
 
