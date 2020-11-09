@@ -1,7 +1,5 @@
 const mongoose = require('mongoose')
 
-mongoose.set('useFindAndModify', false)
-
 const cardSchema = new mongoose.Schema({
   title: {
     type: String,
@@ -19,7 +17,22 @@ const cardSchema = new mongoose.Schema({
   tickingFrom: Date,
   totalHours: Number,
   estimatedHours: Number,
-  overDue: Boolean,
+  notes:[{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Note'
+  }],
+  project: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Project' 
+  },
+  checklist: [{
+    task: String,
+    status: {
+      type: String,
+      enum: ['Done','To-do'],
+      required: true
+    }
+  }],
   activityLog: [
       {
         type: String

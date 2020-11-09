@@ -1,5 +1,4 @@
 const listsRouter = require('express').Router()
-const jwt = require('jsonwebtoken')
 const List = require('../models/list')
 const User = require('../models/user')
 

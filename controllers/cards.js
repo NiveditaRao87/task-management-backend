@@ -1,13 +1,16 @@
 const cardsRouter = require('express').Router()
-const jwt = require('jsonwebtoken')
 const Card = require('../models/card')
 const List = require('../models/list')
+const Project = require('../models/project')
 const User = require('../models/user')
+const Tracker = require('../models/tracker')
+const _ = require('lodash')
 
 cardsRouter.get('/:id', async (request, response) => {
   
   const card = await Card.findById(request.params.id)
                .populate('list', {title: 1, id: 1, user: 1})
+               .populate('project', {title: 1, id: 1})
   
   !card 
   ? response.status(404).end()
@@ -50,13 +53,15 @@ cardsRouter.post('/', async (request, response) => {
 
 cardsRouter.put('/:id', async (request, response) => {
     const card = request.body
-    
+
+    console.log(card)
+
     if(!card.title){
       //treat absence of title as no change in stead of error
       return response.status(304).end()
     }
-    const { user, list } = await Card.findById(request.params.id)
-
+    const { user, list, project: currentProject, timeSpent: currentTimeSpent } = await Card.findById(request.params.id)
+    
     if(!user){
       return response.status(401).json({ error: 'non-existent user'})
     }
@@ -78,10 +83,78 @@ cardsRouter.put('/:id', async (request, response) => {
       await listTo.save()
       await listFrom.save()
     }
-  
-    const updatedCard = await Card
-                                .findByIdAndUpdate(request.params.id, card, { new: true })
-                                .populate('list', {title: 1, id: 1, user: 1})
+
+    //Check if project is being changed
+
+    if(card.project){
+      const project = await Project.findById(card.project)
+      if(currentProject && currentProject !== card.project){
+        const oldProject = await Project.findById(currentProject)
+        oldProject.cards = oldProject.cards.filter(c => c !== card.id)
+        await oldProject.save()
+      }
+      if(!currentProject){
+        project.cards = [...project.cards, card.id]
+        await project.save()
+      }
+    }
+
+    // if(JSON.stringify(card.timeSpent) !== JSON.stringify(currentTimeSpent)){
+    //  const addOrUpdateTracker = card.timeSpent.map(t => 
+    //   !t._id 
+    //     ? {...t , action: 'create'}
+    //     : !_isEqual(t,currentTimeSpent.filter(ct => ct.id === t.id))
+    //     && {...t, action: 'update'}
+    //   ) 
+    
+
+    // addOrUpdateTracker = [...addOrUpdateTracker,
+    // {...currentTimeSpent.filter(t => !card.timeSpent.find(ct => ct.id === t.id)),action: 'delete'}]
+
+    // const trackedOnCard = await Tracker.findAll({card: card.id})
+
+    // addOrUpdateTracker.map(t =>
+    //   t.action === 'delete'
+    //     ? trackedOnCard.filter(tc => tc.start !== t.start)  
+    //   )
+    // }
+    // if(!_.isEqual(card.timeSpent,currentTimeSpent)){
+
+    //   const timeSpentString = card.timeSpent.map(t => 
+    //     ({start: t.start.toString(), stop: t.stop.toString(), _id: t._id.toString()}))
+    //   currentTimeSpent.map(t => 
+    //     ({start: t.start.toString(), stop: t.stop.toString(), _id: t._id.toString()}))
+    //   const newStuff = _.differenceWith(timeSpentString, currentTimeSpent, _.isEqual)
+    //   // const deletedStuff = _.difference(currentTimeSpent, card.timeSpent)
+
+    //   // console.log(_.differenceWith([{a:1, b:2},{a:3, b:2}],[{a:1, b:2},{a:3, b:4}], _.isEqual))
+
+
+
+
+    //    console.log(`card.timeSpent ${JSON.stringify(card.timeSpent)}
+    //    currentTimeSpent ${JSON.stringify(currentTimeSpent)}
+    //    newStuff ${JSON.stringify(newStuff)}`)
+
+    //   newStuff.forEach((t,index) => {
+    //     if(new Date(t.start).getDate() !== new Date(t.stop).getDate()){
+    //       t = {...t, stop: new Date(t.start).setHours(24,0,0,0)}
+    //       newStuff.splice(index + 1, 0, {
+    //         start: new Date().setDate(new Date(t.start).getDate() + 1).setHours(0,0,0,0),
+    //         stop: t.stop}  )
+    //     }
+    //   })
+
+    //   console.log('after',newStuff)
+    // }
+
+
+    const updatedCard = 
+      await Card
+        .findByIdAndUpdate(request.params.id, card, { new: true })
+        .populate('list', {title: 1, id: 1, user: 1})
+        .populate('project',{title: 1, id: 1, dueDate: 1})
+
     response.json(updatedCard.toJSON())
 })
 

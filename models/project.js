@@ -1,24 +1,22 @@
 const mongoose = require('mongoose')
 
-const listSchema = new mongoose.Schema({
+const projectSchema = new mongoose.Schema({
   title: {
     type: String,
     required: true
   },
-  creationDate: Date,
+  dueDate: Date,
+  cards: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Card' 
+  }],
   user: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
-  },
-  cards: [
-      {
-          type: mongoose.Schema.Types.ObjectId,
-          ref: 'Card'
-      }
-  ]
+  }
 })
 
-listSchema.set('toJSON', {
+projectSchema.set('toJSON', {
   transform: (document, returnedObject) => {
     returnedObject.id = returnedObject._id.toString()
     delete returnedObject._id
@@ -26,4 +24,4 @@ listSchema.set('toJSON', {
   }
 })
 
-module.exports = mongoose.model('List', listSchema)
+module.exports = mongoose.model('Project', projectSchema)

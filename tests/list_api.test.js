@@ -6,6 +6,8 @@ const helper = require('./test_helper')
 const List = require('../models/list')
 const Card = require('../models/card')
 const User = require('../models/user')
+const Note = require('../models/note')
+const Project = require('../models/project')
 
 const api = supertest(app)
 
@@ -13,11 +15,15 @@ beforeEach(async () => {
     await List.deleteMany({})
     await Card.deleteMany({})
     await User.deleteMany({})
+    await Note.deleteMany({})
+    await Project.deleteMany({})
 
     const { id } = await helper.createUser()
 
     await helper.createInitialLists(id)
     await helper.createInitialCards(id) //Lists should have already been created before this can be called
+    await helper.createInitialNotes(id)
+    await helper.createInitialProjects(id)
 
 })
 
@@ -450,6 +456,67 @@ describe('updating a card',() => {
     // title should remain unchanged
     expect(editedCard.title).toBe(aCard.title)
   })
+  test('succeeds when a project is added to the card', async() => {
+    const { token, id } = await login()
+
+    const [ aCard ] = (await Card.find({user: id})).map(card => card.toJSON())
+
+    const [aProject] = (await Project.find({user: id})).map(p => p.toJSON())
+
+    const editCard = {...aCard, project: aProject.id}
+
+    await api
+      .put(`/api/cards/${aCard.id}`)
+      .set('Authorization', token)
+      .send(editCard)
+      .expect(200)
+
+    const cardsAtEnd = await helper.cardsInDB()
+    const projectAtEnd = (await helper.projectsInDB()).find(p => p.id === aProject.id)
+    const editedCard = cardsAtEnd.find(c => c.id === aCard.id)
+
+    expect(editedCard.project.toString()).toBe(editCard.project)
+    expect(projectAtEnd.cards).toHaveLength(aProject.cards.length + 1)
+    expect(projectAtEnd.cards.toString()).toContain(aCard.id)
+    
+  })
+  test('succeeds when a project is updated to the card', async() => {
+    const { token, id } = await login()
+
+    const [ aCard ] = (await Card.find({user: id})).map(card => card.toJSON())
+
+    const [aProject, anotherProject] = (await Project.find({user: id})).map(p => p.toJSON())
+
+    const editCard = {...aCard, project: aProject.id}
+
+    // Added project to the card
+    await api
+      .put(`/api/cards/${aCard.id}`)
+      .set('Authorization', token)
+      .send(editCard)
+      .expect(200)
+
+    // Update new project to card
+    
+    const updatedCard = (await Card.findById(aCard.id)).toJSON()
+
+    const secondEditOnCard = {...updatedCard, project: anotherProject.id}
+
+    await api
+      .put(`/api/cards/${aCard.id}`)
+      .set('Authorization', token)
+      .send(secondEditOnCard)
+      .expect(200) 
+
+      const cardsAtEnd = await helper.cardsInDB()
+      const projectAtEnd = (await helper.projectsInDB()).find(p => p.id === anotherProject.id)
+      const editedCard = cardsAtEnd.find(c => c.id === aCard.id)
+  
+      expect(editedCard.project.toString()).toBe(secondEditOnCard.project)
+      expect(projectAtEnd.cards).toHaveLength(anotherProject.cards.length + 1)
+      expect(projectAtEnd.cards.toString()).toContain(aCard.id)
+    
+  })
   test('fails with status 401 when request is sent by another user', async () => {
     const [aCard] = await helper.cardsInDB()
     const editCard = {...aCard, title: 'This update should fail'}
@@ -658,6 +725,383 @@ describe('deletion of a list', () => {
 
 })
 
+describe('adding a new project ', () => {
+  test('succeeds when there is valid data and user', async () => {
+    const {token, id} = await login()
+    
+    const newProject = {
+      title: 'A new project',
+      dueDate: new Date(Date.now())
+    }
+    const projectsAtStart = await helper.projectsInDB()
+
+    await api
+      .post(`/api/projects`)
+      .set('Authorization', token)
+      .send(newProject)
+      .expect(200)
+
+    const projectsAtEnd = await helper.projectsInDB()
+    const projectTitles = projectsAtEnd.map(p => p.title)
+    expect(projectTitles).toContain('A new project')
+    expect(projectsAtEnd).toHaveLength(projectsAtStart.length + 1)
+  })
+  test('fails when token is missing ', async () => {
+    
+    const newProject = {
+      title: 'Project added by non-existent user', 
+      dueDate: new Date(Date.now())
+    }
+    const projectsAtStart = await helper.projectsInDB()
+
+    await api
+      .post(`/api/projects`)
+      .set('Authorization', 'bearer ')
+      .send(newProject)
+      .expect(401)
+
+    const projectsAtEnd = await helper.projectsInDB()
+    const projectTitles = projectsAtEnd.map(p => p.title)
+    expect(projectTitles).not.toContain('Project added by non-existent user')
+    expect(projectsAtEnd).toHaveLength(projectsAtStart.length)
+  })
+})
+
+describe('updating a project ', () =>{
+  test('succeeds with valid data when the owner sends a request', async () => {
+    const {token, id} = await login()
+    
+    const [ aProject ] = (await Project.find({user: id})).map(p => p.toJSON())
+    const updateProject = {
+      ...aProject,
+      dueDate: new Date(2020,12,31), 
+    }
+    const projectsAtStart = await helper.projectsInDB()
+
+    await api
+      .put(`/api/projects/${aProject.id}`)
+      .set('Authorization', token)
+      .send(updateProject)
+      .expect(200)
+
+    const projectsAtEnd = await helper.projectsInDB()
+    const updatedProject = projectsAtEnd.find(p => p.id === aProject.id)
+    expect(projectsAtEnd).toHaveLength(projectsAtStart.length)
+    expect(updatedProject.dueDate).toEqual(new Date(2020,12,31))
+  })
+  test('fails when another user requests it', async() =>{
+    
+    const [ aProject] = (await Project.find({})).map(p => p.toJSON())
+
+    const updatedProject = {
+      ...aProject,
+      title: 'Trying to update another users project'
+    }
+
+    const { username, password } = await helper.createUnauthorisedUser()
+
+    const response = await api
+    .post('/api/login')
+    .send({ username, password })
+    .expect(200)
+    
+    const token = `bearer ${response.body.token}`
+
+    const projectsAtStart = await helper.projectsInDB()
+
+    await api
+      .put(`/api/projects/${aProject.id}`)
+      .set('Authorization', token)
+      .send(updatedProject)
+      .expect(401)
+
+    const projectsAtEnd = await helper.projectsInDB()
+
+    expect(projectsAtStart).toEqual(projectsAtEnd)
+
+  })
+  test('fails when title is missing', async () => {
+    const {token, id} = await login()
+    
+    const [ aProject] = (await Project.find({user: id})).map(p => p.toJSON())
+    const updateProject = {
+      ...aProject,
+      title: '', 
+    }
+    const projectsAtStart = await helper.projectsInDB()
+
+    await api
+      .put(`/api/notes/${aProject.id}`)
+      .set('Authorization', token)
+      .send(updateProject)
+      .expect(304)
+
+    const projectsAtEnd = await helper.projectsInDB()
+    const projectTitles = projectsAtEnd.map(p => p.title)
+    expect(projectTitles).not.toContain('')
+    expect(projectsAtEnd).toHaveLength(projectsAtStart.length)
+  })
+})
+
+describe('deleting a project ', () =>{
+  test('succeeds when the owner sends a request', async () => {
+    const {token, id} = await login()
+    
+    const [ aProject] = (await Project.find({user: id})).map(p => p.toJSON())
+   
+    const projectsAtStart = await helper.projectsInDB()
+
+    await api
+      .delete(`/api/projects/${aProject.id}`)
+      .set('Authorization', token)
+      .expect(204)
+
+    const projectsAtEnd = await helper.projectsInDB()
+    const projectIds = projectsAtEnd.map(p => p.id)
+    expect(projectIds).not.toContain(aProject.id)
+    expect(projectsAtEnd).toHaveLength(projectsAtStart.length - 1)
+  })
+  test('fails when another user sends a request', async () => {
+    const [ aProject] = (await Project.find({})).map(project => project.toJSON())
+
+    const { username, password } = await helper.createUnauthorisedUser()
+
+    const response = await api
+    .post('/api/login')
+    .send({ username, password })
+    .expect(200)
+    
+    const token = `bearer ${response.body.token}`
+
+    const projectsAtStart = await helper.projectsInDB()
+
+    await api
+      .delete(`/api/projects/${aProject.id}`)
+      .set('Authorization', token)
+      .expect(401)
+
+    const projectsAtEnd = await helper.projectsInDB()
+
+    expect(projectsAtStart).toHaveLength(projectsAtEnd.length)
+
+  })
+  test('succeeds when there are cards and notes which belong to that project', async() => {
+    const {token, id} = await login()
+    
+    const [ aProject] = (await Project.find({user: id})).map(p => p.toJSON())
+
+    //This is a dirty update for testing purposes, normally the project would also have a list of
+    //all the cards, but since it is a deletion test, ok to ignore this.
+    await Card.updateMany({user: id},{project: aProject.id})
+    await Note.updateMany({user: id},{project: aProject.id})
+   
+    const projectsAtStart = await helper.projectsInDB()
+    const cardsWithProjectBefore = await Card.find({project: aProject.id})
+    const notesWithProjectBefore = await Note.find({project: aProject.id})
+    const cardsAtStart = await helper.cardsInDB()
+    const notesAtStart = await helper.notesInDB()
+
+    await api
+      .delete(`/api/projects/${aProject.id}`)
+      .set('Authorization', token)
+      .expect(204)
+
+    const projectsAtEnd = await helper.projectsInDB()
+    const projectIds = projectsAtEnd.map(p => p.id)
+    const cardsWithProjectAfter = await Card.find({project: aProject.id})
+    const notesWithProjectAfter = await Note.find({project: aProject.id})
+    const cardsAtEnd = await helper.cardsInDB()
+    const notesAtEnd = await helper.notesInDB()
+    expect(projectIds).not.toContain(aProject.id)
+    expect(projectsAtEnd).toHaveLength(projectsAtStart.length - 1)
+    expect(cardsWithProjectBefore).not.toHaveLength(0)
+    expect(cardsWithProjectAfter).toHaveLength(0)
+    expect(notesWithProjectBefore).not.toHaveLength(0)
+    expect(notesWithProjectAfter).toHaveLength(0)
+    expect(cardsAtEnd).toHaveLength(cardsAtStart.length)
+    expect(notesAtEnd).toHaveLength(notesAtStart.length)
+  })
+})
+
+describe('adding a new note succeeds', () => {
+  test('when it is added to a card', async () => {
+    const {token, id} = await login()
+    
+    const [ aCard ] = (await Card.find({user: id})).map(card => card.toJSON())
+    const newNote = {
+      content: 'Note added for testing', 
+      title: 'A new note',
+      card: aCard.id,
+      project: aCard.project,
+      label: 'Testing'
+    }
+    const notesAtStart = await helper.notesInDB()
+
+    await api
+      .post(`/api/notes`)
+      .set('Authorization', token)
+      .send(newNote)
+      .expect(200)
+
+    const notesAtEnd = await helper.notesInDB()
+    const cardsAtEnd = await helper.cardsInDB()
+    const notesOnCard = cardsAtEnd.find(c => c.id === aCard.id).notes
+    const noteTitles = notesAtEnd.map(note => note.title)
+    expect(noteTitles).toContain('A new note')
+    expect(notesAtEnd).toHaveLength(notesAtStart.length + 1)
+    const createdNote = notesAtEnd.find(n => n.title === 'A new note')
+    expect(notesOnCard.toString()).toContain(createdNote.id.toString())
+  })
+  test('when it is not added on any card', async () => {
+    const { token } = await login()
+    
+    const newNote = {
+      content: 'Note added for testing', 
+      title: 'A new note, not associated with any card',
+      label: 'Testing'
+    }
+    const notesAtStart = await helper.notesInDB()
+
+    await api
+      .post(`/api/notes`)
+      .set('Authorization', token)
+      .send(newNote)
+      .expect(200)
+
+    const notesAtEnd = await helper.notesInDB()
+    const noteTitles = notesAtEnd.map(note => note.title)
+    expect(noteTitles).toContain('A new note, not associated with any card')
+    expect(notesAtEnd).toHaveLength(notesAtStart.length + 1)
+  })
+})
+
+describe('updating a note ', () =>{
+  test('succeeds with valid data when the owner sends a request', async () => {
+    const {token, id} = await login()
+    
+    const [ aCard ] = (await Card.find({user: id})).map(card => card.toJSON())
+    const [ aNote] = (await Note.find({user: id})).map(note => note.toJSON())
+    const updatedNote = {
+      ...aNote,
+      content: 'Update the contents of the note and add it to a card', 
+      card: aCard.id,
+      project: aCard.project,
+    }
+    const notesAtStart = await helper.notesInDB()
+
+    await api
+      .put(`/api/notes/${aNote.id}`)
+      .set('Authorization', token)
+      .send(updatedNote)
+      .expect(200)
+
+    const notesAtEnd = await helper.notesInDB()
+    const cardsAtEnd = await helper.cardsInDB()
+    const notesOnCard = cardsAtEnd.find(c => c.id === aCard.id).notes
+    const notesContents = notesAtEnd.map(note => note.content)
+    expect(notesContents).toContain('Update the contents of the note and add it to a card')
+    expect(notesAtEnd).toHaveLength(notesAtStart.length)
+    const createdNote = notesAtEnd.find(n => n.content === 'Update the contents of the note and add it to a card')
+    expect(notesOnCard.toString()).toContain(createdNote.id.toString())
+  })
+  test('fails when another user requests it', async() =>{
+    
+    const [ aNote] = (await Note.find({})).map(note => note.toJSON())
+
+    const updatedNote = {
+      ...aNote,
+      content: 'Trying to update another users note'
+    }
+
+    const { username, password } = await helper.createUnauthorisedUser()
+
+    const response = await api
+    .post('/api/login')
+    .send({ username, password })
+    .expect(200)
+    
+    const token = `bearer ${response.body.token}`
+
+    const notesAtStart = await helper.notesInDB()
+
+    await api
+      .put(`/api/notes/${aNote.id}`)
+      .set('Authorization', token)
+      .send(updatedNote)
+      .expect(401)
+
+    const notesAtEnd = await helper.notesInDB()
+
+    expect(notesAtStart).toEqual(notesAtEnd)
+
+  })
+  test('fails when content is missing', async () => {
+    const {token, id} = await login()
+    
+    const [ aNote] = (await Note.find({user: id})).map(note => note.toJSON())
+    const updatedNote = {
+      ...aNote,
+      content: '', 
+    }
+    const notesAtStart = await helper.notesInDB()
+
+    await api
+      .put(`/api/notes/${aNote.id}`)
+      .set('Authorization', token)
+      .send(updatedNote)
+      .expect(304)
+
+    const notesAtEnd = await helper.notesInDB()
+    const notesContents = notesAtEnd.map(note => note.content)
+    expect(notesContents).not.toContain('')
+    expect(notesAtEnd).toHaveLength(notesAtStart.length)
+  })
+})
+
+describe('deleting a note ', () =>{
+  test('succeeds when the owner sends a request', async () => {
+    const {token, id} = await login()
+    
+    const [ aNote] = (await Note.find({user: id})).map(note => note.toJSON())
+   
+    const notesAtStart = await helper.notesInDB()
+
+    await api
+      .delete(`/api/notes/${aNote.id}`)
+      .set('Authorization', token)
+      .expect(204)
+
+    const notesAtEnd = await helper.notesInDB()
+    const noteIds = notesAtEnd.map(note => note.id)
+    expect(noteIds).not.toContain(aNote.id)
+    expect(notesAtEnd).toHaveLength(notesAtStart.length - 1)
+  })
+  test('fails when another user sends a request', async () => {
+    const [ aNote] = (await Note.find({})).map(note => note.toJSON())
+
+    const { username, password } = await helper.createUnauthorisedUser()
+
+    const response = await api
+    .post('/api/login')
+    .send({ username, password })
+    .expect(200)
+    
+    const token = `bearer ${response.body.token}`
+
+    const notesAtStart = await helper.notesInDB()
+
+    await api
+      .delete(`/api/notes/${aNote.id}`)
+      .set('Authorization', token)
+      .expect(401)
+
+    const notesAtEnd = await helper.notesInDB()
+
+    expect(notesAtStart).toHaveLength(notesAtEnd.length)
+
+  })
+})
+
 describe('when there is initially one user in db', () => {
   beforeEach(async () => {
     await User.deleteMany({})
@@ -728,27 +1172,7 @@ describe('when there is initially one user in db', () => {
     const usersAtEnd = await helper.usersInDB()
     expect(usersAtEnd).toHaveLength(usersAtStart.length)
   })
-  // test('creation fails with proper statuscode and message if username is less than 3 characters', async () => {
-  //   const usersAtStart = await helper.usersInDB()
-  //   const newUser = {
-  //     username: 'pi',
-  //     firstName: 'Mathematical',
-  //     lastName: 'Constant',
-  //     password: 'password',
-  //   }
 
-  //   const result = await api
-  //     .post('/api/users')
-  //     .send(newUser)
-  //     .expect(400)
-  //     .expect('Content-Type', /application\/json/)
-
-  //   expect(result.body.error).toContain('is shorter than the minimum allowed length')
-  //   expect(result.body.error).toContain('username')
-
-  //   const usersAtEnd = await helper.usersInDB()
-  //   expect(usersAtEnd).toHaveLength(usersAtStart.length)
-  // })
   test('creation fails with proper statuscode and message if password is missing', async () => {
     const usersAtStart = await helper.usersInDB()
     const newUser = {
