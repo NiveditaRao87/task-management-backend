@@ -6,6 +6,7 @@ const projectSchema = new mongoose.Schema({
     required: true
   },
   dueDate: Date,
+  estimatedHours: Number,
   cards: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Card' 

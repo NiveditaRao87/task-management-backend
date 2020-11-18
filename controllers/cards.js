@@ -3,8 +3,18 @@ const Card = require('../models/card')
 const List = require('../models/list')
 const Project = require('../models/project')
 const User = require('../models/user')
-const Tracker = require('../models/tracker')
 const _ = require('lodash')
+const { response } = require('express')
+const project = require('../models/project')
+
+cardsRouter.get('/timer', async (request,response) => {
+  const card = await Card.findOne({tickingFrom: {$ne: new Date(0)}})
+  if(!card){
+    return response.json({noTimerOn: true})
+  }
+
+  response.json(card)
+})
 
 cardsRouter.get('/:id', async (request, response) => {
   
@@ -19,6 +29,7 @@ cardsRouter.get('/:id', async (request, response) => {
   : response.status(401).end()
   
 })
+
 
 cardsRouter.post('/', async (request, response) => {
      const body = request.body
@@ -54,8 +65,6 @@ cardsRouter.post('/', async (request, response) => {
 cardsRouter.put('/:id', async (request, response) => {
     const card = request.body
 
-    console.log(card)
-
     if(!card.title){
       //treat absence of title as no change in stead of error
       return response.status(304).end()
@@ -88,66 +97,19 @@ cardsRouter.put('/:id', async (request, response) => {
 
     if(card.project){
       const project = await Project.findById(card.project)
-      if(currentProject && currentProject !== card.project){
-        const oldProject = await Project.findById(currentProject)
-        oldProject.cards = oldProject.cards.filter(c => c !== card.id)
-        await oldProject.save()
-      }
-      if(!currentProject){
+      if(card.project !== currentProject){
         project.cards = [...project.cards, card.id]
         await project.save()
       }
     }
 
-    // if(JSON.stringify(card.timeSpent) !== JSON.stringify(currentTimeSpent)){
-    //  const addOrUpdateTracker = card.timeSpent.map(t => 
-    //   !t._id 
-    //     ? {...t , action: 'create'}
-    //     : !_isEqual(t,currentTimeSpent.filter(ct => ct.id === t.id))
-    //     && {...t, action: 'update'}
-    //   ) 
-    
+    if(currentProject && (!card.project || (currentProject !== card.project))){
+      const oldProject = await Project.findById(currentProject)
+      oldProject.cards = oldProject.cards.filter(c => c.toString() !== card.id)
+      await oldProject.save()
+    }
 
-    // addOrUpdateTracker = [...addOrUpdateTracker,
-    // {...currentTimeSpent.filter(t => !card.timeSpent.find(ct => ct.id === t.id)),action: 'delete'}]
-
-    // const trackedOnCard = await Tracker.findAll({card: card.id})
-
-    // addOrUpdateTracker.map(t =>
-    //   t.action === 'delete'
-    //     ? trackedOnCard.filter(tc => tc.start !== t.start)  
-    //   )
-    // }
-    // if(!_.isEqual(card.timeSpent,currentTimeSpent)){
-
-    //   const timeSpentString = card.timeSpent.map(t => 
-    //     ({start: t.start.toString(), stop: t.stop.toString(), _id: t._id.toString()}))
-    //   currentTimeSpent.map(t => 
-    //     ({start: t.start.toString(), stop: t.stop.toString(), _id: t._id.toString()}))
-    //   const newStuff = _.differenceWith(timeSpentString, currentTimeSpent, _.isEqual)
-    //   // const deletedStuff = _.difference(currentTimeSpent, card.timeSpent)
-
-    //   // console.log(_.differenceWith([{a:1, b:2},{a:3, b:2}],[{a:1, b:2},{a:3, b:4}], _.isEqual))
-
-
-
-
-    //    console.log(`card.timeSpent ${JSON.stringify(card.timeSpent)}
-    //    currentTimeSpent ${JSON.stringify(currentTimeSpent)}
-    //    newStuff ${JSON.stringify(newStuff)}`)
-
-    //   newStuff.forEach((t,index) => {
-    //     if(new Date(t.start).getDate() !== new Date(t.stop).getDate()){
-    //       t = {...t, stop: new Date(t.start).setHours(24,0,0,0)}
-    //       newStuff.splice(index + 1, 0, {
-    //         start: new Date().setDate(new Date(t.start).getDate() + 1).setHours(0,0,0,0),
-    //         stop: t.stop}  )
-    //     }
-    //   })
-
-    //   console.log('after',newStuff)
-    // }
-
+    card.project = card.project === '' ? null : card.project
 
     const updatedCard = 
       await Card

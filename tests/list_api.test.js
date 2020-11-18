@@ -725,6 +725,129 @@ describe('deletion of a list', () => {
 
 })
 
+describe('when there are initially some projects saved', () => {
+  
+  test('projects are returned as json', async () => {
+    const {token} = await login()
+    
+    await api
+      .get('/api/projects')
+      .set('Authorization', token)
+      .expect(200)
+      .expect('Content-Type', /application\/json/)
+  })
+  test('only projects of the user are returned', async () => {
+    
+    //Create lists of another user so that the database has data of more than one user
+
+    await helper.createProjectsOfAnotherUser()
+    const projectsInDB = await helper.projectsInDB()
+
+    const {token, id} = await login()
+    
+    const projectsOfUser = await Project.find({user: id})
+    const response = await api.get('/api/projects').set('Authorization', token)
+
+    expect(response.body.length).toBeLessThan(projectsInDB.length)
+    expect(response.body).toHaveLength(projectsOfUser.length)
+  })  
+  test('a user is unable to retrieve another users project', async () => {
+    
+    const projectsInDB = await helper.projectsInDB()
+    const { username, password } = await helper.createUnauthorisedUser()
+
+    const loginResponse = await api
+    .post('/api/login')
+    .send({ username, password })
+    .expect(200)
+    
+    const token = `bearer ${loginResponse.body.token}`
+
+    //This user has no projects so returned length should be zero
+    
+    const response = await api.get('/api/projects').set('Authorization', token)
+
+    expect(projectsInDB.length).toBeGreaterThan(0)
+    expect(response.body).toHaveLength(0)
+  })  
+  test('a specific project is within the returned projects', async () => {
+    
+    const {token} = await login()
+    
+    const response = await api.get('/api/projects').set('Authorization', token)
+
+    const titles = response.body.map(r => r.title)
+    expect(titles).toContain('Task manager')
+  })
+})
+
+describe.only('viewing a specific project', () => {
+  test('succeeds with a valid id when requested by the owner', async () => {
+    const projectsAtStart = await helper.projectsInDB()
+
+    const projectToView = projectsAtStart[0]
+
+    const { token } = await login()
+
+    const resultProject = await api
+      .get(`/api/projects/${projectToView.id}`)
+      .set('Authorization', token)
+      .expect(200)
+      .expect('Content-Type', /application\/json/)
+
+    projectToView.user = projectToView.user.toString()
+    
+    expect(resultProject.body.title).toEqual(projectToView.title)
+    expect(resultProject.body).toHaveProperty('cards')
+  })
+
+  test('fails with a status code 401 when not requested by owner', async () => {
+
+    const projectsAtStart = await helper.projectsInDB()
+
+    const projectToView = projectsAtStart[0]
+    
+    const { username, password } = await helper.createUnauthorisedUser()
+
+    const response = await api
+    .post('/api/login')
+    .send({ username, password })
+    .expect(200)
+    
+    const token = `bearer ${response.body.token}`
+
+    await api
+      .get(`/api/projects/${projectToView.id}`)
+      .set('Authorization', token)
+      .expect(401)
+
+  })
+  test('fails with statuscode 404 if project does not exist', async () => {
+    
+    const {token, id} = await login()
+    
+    const validNonexistingId = await helper.nonExistingId(id)
+
+    console.log(validNonexistingId)
+
+    await api
+      .get(`/api/projects/${validNonexistingId}`)
+      .set('Authorization',token)
+      .expect(404)
+  })
+
+  test('fails with statuscode 400 id is invalid', async () => {
+    const invalidId = '5a3d5da59070081a82a3445'
+
+    const {token} = await login()
+
+    await api
+      .get(`/api/projects/${invalidId}`)
+      .set('Authorization',token)
+      .expect(400)
+  })
+})
+
 describe('adding a new project ', () => {
   test('succeeds when there is valid data and user', async () => {
     const {token, id} = await login()

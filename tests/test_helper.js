@@ -212,6 +212,24 @@ const createInitialProjects = async (user) => {
     }
 }
 
+const createProjectsOfAnotherUser = async () => {
+  const username = 'makesome@email.com'
+  const password = 'fillerdata'
+  const passwordHash = await bcrypt.hash(password, 10)
+  const user = new User({
+    username,
+    passwordHash,
+    firstName: 'Another',
+    lastName: 'User'
+  })
+  const savedUser = await user.save()
+
+  for (let project of initialProjects) {
+    const projectObject = new Project({...project, user: savedUser.id})
+    await projectObject.save()
+  }
+}
+
 module.exports = {
     createInitialLists,
     listsInDB, 
@@ -227,4 +245,5 @@ module.exports = {
     createInitialNotes,
     projectsInDB,
     createInitialProjects,
+    createProjectsOfAnotherUser,
 }
